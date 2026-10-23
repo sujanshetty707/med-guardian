@@ -130,10 +130,16 @@ class AuditLog(Base):
     ts = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 # Database setup
-# Render provides DATABASE_URL as postgres://... but SQLAlchemy 1.4+ needs postgresql://
+# Render provides DATABASE_URL as postgres://... but SQLAlchemy needs postgresql+psycopg://
 _db_url = settings.DATABASE_URL
-if _db_url.startswith("postgres://"):
-    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+
+if not _db_url.startswith("sqlite"):
+    # Normalise legacy postgres:// → postgresql://
+    if _db_url.startswith("postgres://"):
+        _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+    # Force psycopg v3 driver (SQLAlchemy 2.x default on Render)
+    if _db_url.startswith("postgresql://"):
+        _db_url = _db_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 engine = create_engine(
     _db_url,
