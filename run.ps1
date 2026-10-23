@@ -27,8 +27,13 @@ switch ($Command) {
         Write-Host "Starting All 5 Med-Guardian Agents via Bureau..." -ForegroundColor Cyan
         & $VENV_PYTHON scripts/run_agents.py
     }
+    "chat" {
+        Write-Host "Starting Interactive Med-Guardian Chat..." -ForegroundColor Cyan
+        & $VENV_PYTHON scripts/chat_cli.py
+    }
     default {
         Write-Host "Med-Guardian CLI Commands:" -ForegroundColor Yellow
+        Write-Host "  .\run.ps1 chat       - Chat interactively with Med-Guardian in your console"
         Write-Host "  .\run.ps1 test       - Run all 12 unit and resilience tests"
         Write-Host "  .\run.ps1 sim        - Run the multi-turn ASI:One primary demo simulation"
         Write-Host "  .\run.ps1 seed       - Seed initial demo patient and caregiver records"
