@@ -1,0 +1,59 @@
+services:
+  - type: web
+    name: med-guardian
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/run_agents.py
+    healthCheckPath: /submit
+    envVars:
+      # Seeds - keep these stable so agent addresses never change
+      - key: ORCHESTRATOR_SEED
+        value: med-guardian-orchestrator-seed-2026-secure
+      - key: SCHEDULE_SEED
+        value: med-guardian-schedule-seed-2026-secure
+      - key: SAFETY_SEED
+        value: med-guardian-safety-seed-2026-secure
+      - key: PHARMACY_SEED
+        value: med-guardian-pharmacy-seed-2026-secure
+      - key: CAREGIVER_SEED
+        value: med-guardian-caregiver-seed-2026-secure
+      - key: AGENT_SEED_PHRASE
+        value: med-guardian-orchestrator-seed-2026-secure
+      # API Keys - add your real values in Render dashboard
+      - key: AGENTVERSE_API_KEY
+        sync: false
+      - key: AGENTVERSE_KEY
+        sync: false
+      - key: ASI1_API_KEY
+        sync: false
+      - key: OPENAI_API_BASE
+        value: https://api.asi1.ai/v1
+      # Database is auto-injected by Render from the database block below
+      - key: DATABASE_URL
+        fromDatabase:
+          name: med-guardian-db
+          property: connectionString
+      # Notification keys (optional - add in dashboard for live Telegram)
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_DEFAULT_CHAT_ID
+        sync: false
+      # Settings
+      - key: PRICE_PROVIDERS
+        value: nadac,mock_partner
+      - key: REMINDER_GRACE_MINUTES
+        value: "20"
+      - key: MISSED_AFTER_MINUTES
+        value: "40"
+      - key: REFILL_THRESHOLD_DAYS
+        value: "7"
+      - key: LOG_LEVEL
+        value: INFO
+
+databases:
+  - name: med-guardian-db
+    databaseName: medguardian
+    region: oregon
+    plan: free

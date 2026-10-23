@@ -130,9 +130,15 @@ class AuditLog(Base):
     ts = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 # Database setup
+# Render provides DATABASE_URL as postgres://... but SQLAlchemy 1.4+ needs postgresql://
+_db_url = settings.DATABASE_URL
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
+    _db_url,
+    connect_args={"check_same_thread": False} if "sqlite" in _db_url else {},
+    pool_pre_ping=True,   # auto-reconnect if cloud DB connection drops
     echo=False
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
