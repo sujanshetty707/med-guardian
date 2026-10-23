@@ -10,11 +10,15 @@ from tools.openfda import openfda_client
 
 logger = logging.getLogger("med-guardian.agents.safety")
 
+use_mailbox = bool(settings.AGENTVERSE_API_KEY)
 safety_agent = Agent(
     name="med-guardian-safety",
     seed=settings.SAFETY_SEED,
     port=settings.SAFETY_PORT,
-    endpoint=[f"http://127.0.0.1:{settings.SAFETY_PORT}/submit"],
+    mailbox=use_mailbox,
+    agentverse=settings.AGENTVERSE_API_KEY if use_mailbox else None,
+    endpoint=None if use_mailbox else [f"http://127.0.0.1:{settings.SAFETY_PORT}/submit"],
+    publish_agent_details=True,
 )
 
 safety_proto = Protocol(name="SafetyProtocol", version="0.1.0")

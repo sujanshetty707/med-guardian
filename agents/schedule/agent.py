@@ -16,11 +16,15 @@ from core.db import SessionLocal, Patient, Medication, Schedule, DoseEvent, Audi
 
 logger = logging.getLogger("med-guardian.agents.schedule")
 
+use_mailbox = bool(settings.AGENTVERSE_API_KEY)
 schedule_agent = Agent(
     name="med-guardian-schedule",
     seed=settings.SCHEDULE_SEED,
     port=settings.SCHEDULE_PORT,
-    endpoint=[f"http://127.0.0.1:{settings.SCHEDULE_PORT}/submit"],
+    mailbox=use_mailbox,
+    agentverse=settings.AGENTVERSE_API_KEY if use_mailbox else None,
+    endpoint=None if use_mailbox else [f"http://127.0.0.1:{settings.SCHEDULE_PORT}/submit"],
+    publish_agent_details=True,
 )
 
 schedule_proto = Protocol(name="ScheduleProtocol", version="0.1.0")

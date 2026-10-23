@@ -33,11 +33,15 @@ from core.db import SessionLocal, Patient, Medication, DoseEvent
 
 logger = logging.getLogger("med-guardian.orchestrator")
 
+use_mailbox = bool(settings.AGENTVERSE_API_KEY)
 orchestrator_agent = Agent(
     name="med-guardian",
     seed=settings.ORCHESTRATOR_SEED,
     port=settings.ORCHESTRATOR_PORT,
-    endpoint=[f"http://127.0.0.1:{settings.ORCHESTRATOR_PORT}/submit"],
+    mailbox=use_mailbox,
+    agentverse=settings.AGENTVERSE_API_KEY if use_mailbox else None,
+    endpoint=None if use_mailbox else [f"http://127.0.0.1:{settings.ORCHESTRATOR_PORT}/submit"],
+    publish_agent_details=True,
 )
 
 chat_proto = Protocol(spec=chat_protocol_spec)

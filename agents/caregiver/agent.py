@@ -12,11 +12,15 @@ from tools.notify.dispatcher import dispatcher
 
 logger = logging.getLogger("med-guardian.agents.caregiver")
 
+use_mailbox = bool(settings.AGENTVERSE_API_KEY)
 caregiver_agent = Agent(
     name="med-guardian-caregiver",
     seed=settings.CAREGIVER_SEED,
     port=settings.CAREGIVER_PORT,
-    endpoint=[f"http://127.0.0.1:{settings.CAREGIVER_PORT}/submit"],
+    mailbox=use_mailbox,
+    agentverse=settings.AGENTVERSE_API_KEY if use_mailbox else None,
+    endpoint=None if use_mailbox else [f"http://127.0.0.1:{settings.CAREGIVER_PORT}/submit"],
+    publish_agent_details=True,
 )
 
 caregiver_proto = Protocol(name="CaregiverProtocol", version="0.1.0")

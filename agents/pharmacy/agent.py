@@ -12,11 +12,15 @@ from tools.payments import payment_manager
 
 logger = logging.getLogger("med-guardian.agents.pharmacy")
 
+use_mailbox = bool(settings.AGENTVERSE_API_KEY)
 pharmacy_agent = Agent(
     name="med-guardian-pharmacy",
     seed=settings.PHARMACY_SEED,
     port=settings.PHARMACY_PORT,
-    endpoint=[f"http://127.0.0.1:{settings.PHARMACY_PORT}/submit"],
+    mailbox=use_mailbox,
+    agentverse=settings.AGENTVERSE_API_KEY if use_mailbox else None,
+    endpoint=None if use_mailbox else [f"http://127.0.0.1:{settings.PHARMACY_PORT}/submit"],
+    publish_agent_details=True,
 )
 
 pharmacy_proto = Protocol(name="PharmacyProtocol", version="0.1.0")
