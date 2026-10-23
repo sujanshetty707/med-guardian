@@ -21,8 +21,15 @@ def create_ack(msg_id: uuid.UUID) -> ChatAcknowledgement:
 def create_text_chat_message(text: str, card_data: Optional[Dict[str, Any]] = None) -> ChatMessage:
     contents = [TextContent(type="text", text=text)]
     if card_data:
-        # Include metadata/card structure if available
-        contents.append(MetadataContent(type="metadata", metadata=card_data))
+        try:
+            # MetadataContent in uagents_core expects Mapping[str, str]
+            string_metadata = {
+                str(k): (v if isinstance(v, str) else json.dumps(v))
+                for k, v in card_data.items()
+            }
+            contents.append(MetadataContent(type="metadata", metadata=string_metadata))
+        except Exception as e:
+            logger.warning(f"Could not attach card metadata to message: {e}")
     return ChatMessage(
         timestamp=datetime.now(timezone.utc),
         msg_id=uuid.uuid4(),

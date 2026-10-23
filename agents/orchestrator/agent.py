@@ -426,15 +426,22 @@ async def handle_chat(ctx: Context, sender: str, msg: ChatMessage):
     user_text = extract_text(msg)
     ctx.logger.info(f"Received ACP ChatMessage from {sender}: '{user_text}'")
 
-    # 3. Process turn
-    card_payload = await process_orchestrator_turn(sender, user_text)
+    try:
+        # 3. Process turn
+        card_payload = await process_orchestrator_turn(sender, user_text)
 
-    # 4. Reply with ChatMessage containing text and metadata
-    reply_msg = create_text_chat_message(
-        text=card_payload.text_fallback,
-        card_data=card_payload.to_dict()
-    )
-    await ctx.send(sender, reply_msg)
+        # 4. Reply with ChatMessage containing text and metadata
+        reply_msg = create_text_chat_message(
+            text=card_payload.text_fallback,
+            card_data=card_payload.to_dict()
+        )
+        await ctx.send(sender, reply_msg)
+    except Exception as e:
+        ctx.logger.error(f"Error handling ACP message: {e}", exc_info=True)
+        fallback_msg = create_text_chat_message(
+            text="⚠️ I had trouble processing your message. Could you please rephrase or try again?"
+        )
+        await ctx.send(sender, fallback_msg)
 
 @chat_proto.on_message(ChatAcknowledgement)
 async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
