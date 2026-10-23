@@ -1,11 +1,15 @@
 import re
 import json
+import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from core.config import settings
 from core.models import ParsedMedSchedule
 
 logger = logging.getLogger("med-guardian.core.llm")
+
+# LLM TIMEOUT — never wait more than 5 seconds
+LLM_TIMEOUT_SECONDS = 5
 
 # Try to import OpenAI client for ASI1 LLM calls
 try:
@@ -27,13 +31,16 @@ class LLMParser:
         if openai_available and settings.ASI1_API_KEY:
             self.client = AsyncOpenAI(
                 api_key=settings.ASI1_API_KEY,
-                base_url=settings.OPENAI_API_BASE
+                base_url=settings.OPENAI_API_BASE,
+                timeout=LLM_TIMEOUT_SECONDS,
             )
 
     async def classify_and_extract(self, text: str, session_state: Dict[str, Any]) -> IntentClassification:
         normalized = text.strip().lower()
         pending = session_state.get("_pending_action", {})
         pending_type = pending.get("type", "")
+
+        # ── FAST PATH: all rule-based checks run BEFORE any LLM call ──────────
 
         # 1. Action-ID or button-tap match (Card actions)
         if "med.confirm" in normalized or (pending_type == "medication_intake" and normalized in ["confirm", "yes", "save", "confirm schedule", "looks good"]):
@@ -62,7 +69,6 @@ class LLMParser:
             return IntentClassification("WEEKLY_REPORT", {}, raw_text=text)
 
         if any(k in normalized for k in ["refill", "order more", "price comparison", "running low", "cheapest pharmacy"]):
-            # Extract drug if specified
             drug_match = re.search(r"refill\s+([a-zA-Z]+)", normalized)
             drug_name = drug_match.group(1) if drug_match else "Metformin"
             return IntentClassification("REFILL", {"drug_name": drug_name}, raw_text=text)
@@ -70,7 +76,16 @@ class LLMParser:
         if "link caregiver" in normalized or "add caregiver" in normalized:
             return IntentClassification("LINK_CAREGIVER", {"raw": text}, raw_text=text)
 
-        # 2. Check for LLM assisted parsing if client is configured
+        if any(k in normalized for k in ["interact", "interaction", "safe together", "take with", "can i take"]):
+            return IntentClassification("CHECK_INTERACTION", {"raw": text}, raw_text=text)
+
+        # Rule-based medication schedule parser
+        meds = self.extract_medications_rule_based(text)
+        if meds:
+            return IntentClassification("ADD_MEDICATIONS", {"medications": meds}, raw_text=text)
+
+        # ── SLOW PATH: LLM only for genuinely ambiguous free-form text ─────────
+        # Only used if ASI1_API_KEY is set AND the message wasn't handled above
         if self.client:
             try:
                 prompt = (
@@ -79,27 +94,23 @@ class LLMParser:
                     "Extract entities (medications with name, strength, frequency, timing, qty_on_hand).\n"
                     "Return ONLY JSON: {\"intent\": \"...\", \"medications\": [...], \"entities\": {...}}"
                 )
-                response = await self.client.chat.completions.create(
+                llm_coro = self.client.chat.completions.create(
                     model="asi1-mini",
                     messages=[
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": text}
                     ],
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    max_tokens=256,     # keep responses fast and focused
                 )
+                response = await asyncio.wait_for(llm_coro, timeout=LLM_TIMEOUT_SECONDS)
                 parsed = json.loads(response.choices[0].message.content)
                 intent_name = parsed.get("intent", "ADD_MEDICATIONS")
                 return IntentClassification(intent_name, parsed, raw_text=text)
+            except asyncio.TimeoutError:
+                logger.warning("ASI1 LLM timed out after 5s — using GENERAL fallback.")
             except Exception as e:
-                logger.warning(f"ASI1 LLM call failed or timed out: {e}. Falling back to rule-based parser.")
-
-        # 3. Rule-based / Regex medication schedule parser (Robust Fallback)
-        meds = self.extract_medications_rule_based(text)
-        if meds:
-            return IntentClassification("ADD_MEDICATIONS", {"medications": meds}, raw_text=text)
-
-        if any(k in normalized for k in ["interact", "interaction", "safe together", "take with"]):
-            return IntentClassification("CHECK_INTERACTION", {"raw": text}, raw_text=text)
+                logger.warning(f"ASI1 LLM call failed: {e} — using GENERAL fallback.")
 
         return IntentClassification("GENERAL", {"text": text}, raw_text=text)
 
