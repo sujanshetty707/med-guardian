@@ -20,7 +20,8 @@ def main():
     print("=" * 80)
     init_db()
 
-    bureau = Bureau(port=settings.ORCHESTRATOR_PORT)
+    endpoint_cfg = [f"http://127.0.0.1:{settings.ORCHESTRATOR_PORT}/submit"]
+    bureau = Bureau(port=settings.ORCHESTRATOR_PORT, endpoint=endpoint_cfg)
     bureau.add(orchestrator_agent)
     bureau.add(schedule_agent)
     bureau.add(safety_agent)
