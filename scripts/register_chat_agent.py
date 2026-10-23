@@ -13,14 +13,23 @@ from uagents_core.utils.registration import (
 
 def run():
     print("Calling register_chat_agent with Agentverse...")
-    agentverse_key = os.environ.get("AGENTVERSE_KEY")
+    # AGENTVERSE_API_KEY is the longer-lived token (expires in 30 days)
+    # AGENTVERSE_KEY is the short-lived registration token (1 hour)
+    agentverse_key = (
+        os.environ.get("AGENTVERSE_API_KEY")
+        or os.environ.get("AGENTVERSE_KEY")
+    )
     agent_seed = os.environ.get("AGENT_SEED_PHRASE", "med-guardian-orchestrator-seed-2026-secure")
 
     if not agentverse_key:
-        print("ERROR: AGENTVERSE_KEY environment variable not set!")
+        print("ERROR: Neither AGENTVERSE_API_KEY nor AGENTVERSE_KEY is set!")
         return
 
-    endpoint_url = "https://movie-joseph-descriptions-speaking.trycloudflare.com/submit"
+    # Use AGENT_ENDPOINT from env (Render URL), fallback to hardcoded Render URL
+    endpoint_url = os.environ.get(
+        "AGENT_ENDPOINT",
+        "https://med-guardian-78xj.onrender.com/submit"
+    )
     print(f"Registering Med-Guardian at {endpoint_url}...")
 
     try:
