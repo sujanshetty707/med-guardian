@@ -44,20 +44,20 @@ class LLMParser:
         # ── FAST PATH: all rule-based checks run BEFORE any LLM call ──────────
 
         # 1. Action-ID or button-tap match (Card actions)
-        if "med.confirm" in normalized or (pending_type == "medication_intake" and normalized in ["confirm", "yes", "save", "confirm schedule", "looks good"]):
+        if "med.confirm" in normalized or (pending_type == "medication_intake" and any(k in normalized for k in ["confirm", "yes", "save", "confirm schedule", "looks good", "✅"])):
             return IntentClassification("CONFIRM_SCHEDULE", {"action": "confirm"}, is_confirmation=True, raw_text=text)
         
-        if "med.cancel" in normalized or (pending_type == "medication_intake" and normalized in ["cancel", "no", "abort"]):
+        if "med.cancel" in normalized or (pending_type == "medication_intake" and any(k in normalized for k in ["cancel", "no", "abort", "❌"])):
             return IntentClassification("CONFIRM_SCHEDULE", {"action": "cancel"}, is_confirmation=True, raw_text=text)
 
-        if "refill.approve" in normalized or (pending_type == "refill_approval" and any(k in normalized for k in ["approve", "approve & pay", "yes", "pay"])):
+        if "refill.approve" in normalized or (pending_type == "refill_approval" and any(k in normalized for k in ["approve", "approve & pay", "yes", "pay", "💳"])):
             order_id = pending.get("order_id", "")
             return IntentClassification("REFILL_APPROVE", {"action": "approve", "order_id": order_id}, is_confirmation=True, raw_text=text)
 
-        if "refill.cancel" in normalized or (pending_type == "refill_approval" and any(k in normalized for k in ["cancel", "no", "abort"])):
+        if "refill.cancel" in normalized or (pending_type == "refill_approval" and any(k in normalized for k in ["cancel", "no", "abort", "❌"])):
             return IntentClassification("REFILL_APPROVE", {"action": "cancel"}, is_confirmation=True, raw_text=text)
 
-        if "refill.select" in normalized or (pending_type == "price_carousel" and "option" in normalized):
+        if "refill.select" in normalized or (pending_type == "price_carousel" and ("option" in normalized or "select" in normalized)):
             opt = re.search(r"(\d+)", normalized)
             option_idx = int(opt.group(1)) if opt else 1
             return IntentClassification("REFILL_SELECT", {"option_index": option_idx}, is_confirmation=True, raw_text=text)
@@ -74,8 +74,9 @@ class LLMParser:
             return IntentClassification("CHECK_DOSE", {}, raw_text=text)
 
         # Dose confirmation actions ("Taken", "Skip", "Later", etc.)
-        if any(action in normalized for action in ["mark taken", "dose.taken", "dose.skip", "snooze", "remind in 15m"]) or normalized in ["taken", "i took it", "already taken", "skip", "skipped", "later"]:
-            action = "taken" if any(w in normalized for w in ["taken", "took"]) else ("skipped" if "skip" in normalized else "later")
+        dose_action_keywords = ["mark taken", "dose.taken", "dose.skip", "snooze", "remind in 15m", "snooze 15m", "🟢", "🟡", "⏱️"]
+        if any(action in normalized for action in dose_action_keywords) or normalized in ["taken", "i took it", "already taken", "skip", "skipped", "later"]:
+            action = "taken" if any(w in normalized for w in ["taken", "took", "🟢"]) else ("skipped" if any(w in normalized for w in ["skip", "🟡"]) else "later")
             return IntentClassification("LOG_DOSE", {"action": action}, raw_text=text)
 
         if any(k in normalized for k in ["how did dad do", "weekly report", "adherence report", "weekly adherence", "status", "adherence"]):
