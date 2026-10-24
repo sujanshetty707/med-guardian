@@ -2,6 +2,7 @@ import re
 import json
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from core.config import settings
 from core.models import ParsedMedSchedule
@@ -61,8 +62,20 @@ class LLMParser:
             option_idx = int(opt.group(1)) if opt else 1
             return IntentClassification("REFILL_SELECT", {"option_index": option_idx}, is_confirmation=True, raw_text=text)
 
-        if any(action in normalized for action in ["taken", "skip", "skipped", "later", "mark taken", "dose.taken", "dose.skip"]):
-            action = "taken" if "taken" in normalized else ("skipped" if "skip" in normalized else "later")
+        # Check dose / dose status inquiries ("Did I take my medicine?", "Is it time for pills?", etc.)
+        check_dose_patterns = [
+            "did i take", "have i taken", "did dad take", "was the medicine taken",
+            "is it time for", "time to take", "check dose", "check my dose",
+            "what dose", "what medicines are due", "any medicine due",
+            "next dose", "remind me to take", "do i need to take", "should i take my pill",
+            "dose status", "any pills due", "missed dose", "did i miss"
+        ]
+        if any(k in normalized for k in check_dose_patterns):
+            return IntentClassification("CHECK_DOSE", {}, raw_text=text)
+
+        # Dose confirmation actions ("Taken", "Skip", "Later", etc.)
+        if any(action in normalized for action in ["mark taken", "dose.taken", "dose.skip", "snooze", "remind in 15m"]) or normalized in ["taken", "i took it", "already taken", "skip", "skipped", "later"]:
+            action = "taken" if any(w in normalized for w in ["taken", "took"]) else ("skipped" if "skip" in normalized else "later")
             return IntentClassification("LOG_DOSE", {"action": action}, raw_text=text)
 
         if any(k in normalized for k in ["how did dad do", "weekly report", "adherence report", "weekly adherence", "status", "adherence"]):
@@ -208,12 +221,18 @@ class LLMParser:
         Generate a conversational response for general/unrecognized messages.
         Uses the LLM when available, falls back to smart rule-based responses.
         """
+        now_utc = datetime.now(timezone.utc)
+        current_time_str = now_utc.strftime("%A, %B %d, %Y at %I:%M:%S %p UTC")
+
         if self.client:
             try:
                 system_prompt = (
                     "You are Med-Guardian, a friendly and knowledgeable medication adherence assistant. "
                     "You help patients and caregivers manage medication schedules, track doses, check interactions, "
                     "compare pharmacy prices, and monitor adherence.\n\n"
+                    f"CURRENT REAL-TIME CLOCK:\n"
+                    f"- Current Real-Time Date & Time: {current_time_str}\n"
+                    f"- IMPORTANT: When asked about the date, day, month, year, or time, always use this real-time clock.\n\n"
                     "IMPORTANT RULES:\n"
                     "- You are NOT a doctor. Never diagnose, prescribe, or recommend dosage changes.\n"
                     "- For medical emergencies, always tell the user to call 911.\n"
@@ -256,6 +275,16 @@ class LLMParser:
         Actually responds to what the user asked instead of showing the generic welcome.
         """
         normalized = text.strip().lower()
+
+        # Real-time date and time inquiries
+        if any(p in normalized for p in ["what time is it", "what's the time", "current time", "what day is it", "what date is it", "today's date", "what is today's date", "what is the date", "what date is today"]):
+            now_utc = datetime.now(timezone.utc)
+            return (
+                f"🕒 **Current Real-Time Clock**\n\n"
+                f"• **Date:** {now_utc.strftime('%A, %B %d, %Y')}\n"
+                f"• **Time:** {now_utc.strftime('%I:%M:%S %p UTC')}\n\n"
+                f"All dose tracking, reminder grace periods, and escalation timers run on this real-time clock."
+            )
 
         # Greetings
         if any(g in normalized for g in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "sup"]):

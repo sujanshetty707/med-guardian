@@ -192,6 +192,68 @@ async def process_orchestrator_turn(sender_addr: str, text: str) -> CardPayload:
         )
         return CardPayload("confirmed_notice", {"count": len(meds)}, guardrails.post_format(reply))
 
+    elif intent.name == "CHECK_DOSE":
+        with SessionLocal() as db:
+            patient = db.query(Patient).filter(Patient.id == patient_id).first()
+            p_name = patient.display_name if patient else "Dad (Ramesh)"
+            meds = db.query(Medication).filter(
+                Medication.patient_id == patient_id,
+                Medication.active == True
+            ).all()
+
+            if not meds:
+                reply = (
+                    f"📋 **No Medications Currently Scheduled for {p_name}**\n\n"
+                    f"You haven't set up any active medication schedules yet.\n"
+                    f"To add medicines and start dose tracking, just tell me what you take:\n"
+                    f"*\"I'm managing Dad's medicines: Metformin 500mg twice daily, Amlodipine 5mg morning.\"*"
+                )
+                return CardPayload("text_reply", {}, guardrails.post_format(reply))
+
+            # Look for unconfirmed / pending dose
+            pending_event = db.query(DoseEvent).join(Medication).filter(
+                Medication.patient_id == patient_id,
+                DoseEvent.status == "pending"
+            ).order_by(DoseEvent.due_at.asc()).first()
+
+            if pending_event and pending_event.medication:
+                med = pending_event.medication
+                due_time = pending_event.due_at.strftime("%I:%M %p UTC") if pending_event.due_at else "Now"
+                card = cards.dose_checkin(
+                    patient_name=p_name,
+                    drug_name=med.display_name,
+                    strength=med.strength or "",
+                    due_time=due_time
+                )
+                return CardPayload(card.card_type, card.card_data, guardrails.post_format(card.text_fallback))
+
+            # If no pending dose, check latest confirmed dose
+            latest = db.query(DoseEvent).join(Medication).filter(
+                Medication.patient_id == patient_id
+            ).order_by(DoseEvent.confirmed_at.desc(), DoseEvent.due_at.desc()).first()
+
+            if latest and latest.status == "taken" and latest.medication:
+                conf_str = latest.confirmed_at.strftime("%I:%M %p UTC") if latest.confirmed_at else "earlier today"
+                med_items = "\n".join([f"• **{m.display_name}** {m.strength or ''} (Supply: {m.qty_on_hand} pills left)" for m in meds])
+                reply = (
+                    f"✅ **Dose Status for {p_name}**\n\n"
+                    f"• Latest scheduled dose of **{latest.medication.display_name}** was logged as **TAKEN** at {conf_str}.\n"
+                    f"• No doses are currently overdue.\n\n"
+                    f"**Active Medications:**\n{med_items}\n\n"
+                    f"Want to log another dose now? Reply **'Taken'** or **'Skip'**."
+                )
+                return CardPayload("dose_status", {"status": "all_taken"}, guardrails.post_format(reply))
+
+            # Default: show checkin card for first med
+            m0 = meds[0]
+            card = cards.dose_checkin(
+                patient_name=p_name,
+                drug_name=m0.display_name,
+                strength=m0.strength or "",
+                due_time="Scheduled Time"
+            )
+            return CardPayload(card.card_type, card.card_data, guardrails.post_format(card.text_fallback))
+
     elif intent.name == "LOG_DOSE":
         action = intent.entities.get("action", "taken")
         with SessionLocal() as db:
@@ -422,6 +484,25 @@ async def process_orchestrator_turn(sender_addr: str, text: str) -> CardPayload:
             context=f"Patient ID: {patient_id}",
             patient_meds=patient_med_names if patient_med_names else None,
         )
+
+        # Proactively check if the patient has a pending dose waiting for confirmation
+        try:
+            with SessionLocal() as db:
+                pending_event = db.query(DoseEvent).join(Medication).filter(
+                    Medication.patient_id == patient_id,
+                    DoseEvent.status == "pending"
+                ).first()
+                if pending_event and pending_event.medication:
+                    med_name = pending_event.medication.display_name
+                    dose_prompt = (
+                        f"\n\n---\n"
+                        f"⏰ **Dose Check-in**: By the way, have you taken your scheduled dose of **{med_name}**? "
+                        f"(Reply **'Taken'** or **'Skip'**)"
+                    )
+                    reply = f"{reply}{dose_prompt}"
+        except Exception:
+            pass
+
         return CardPayload("general_response", {}, guardrails.post_format(reply))
 
 # --- ACP Chat Handlers ---
