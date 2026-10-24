@@ -2,14 +2,16 @@ from typing import List, Dict, Any, Optional
 from core.models import ParsedMedSchedule, InteractionFinding, Quote, RunwayItem
 
 class CardPayload:
-    def __init__(self, card_type: str, card_data: Dict[str, Any], text_fallback: str):
+    def __init__(self, card_type: str, card_data: Dict[str, Any], text_fallback: str, card_kind: str = "detail"):
         self.card_type = card_type
         self.card_data = card_data
         self.text_fallback = text_fallback
+        self.card_kind = card_kind
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": "interactive_card",
+            "card_kind": self.card_kind,
             "card_type": self.card_type,
             "data": self.card_data,
             "text": self.text_fallback
@@ -19,54 +21,50 @@ class CardBuilder:
     @staticmethod
     def dose_checkin(patient_name: str, drug_name: str, strength: str, due_time: str) -> CardPayload:
         strength_str = f" {strength}" if strength else ""
-        lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            f"│ ⏰ DOSE TIME CHECK-IN: {drug_name.upper()} {strength}".ljust(57) + "│",
-            "├────────────────────────────────────────────────────────┤",
-            f"│ 👤 Patient:     {patient_name}".ljust(57) + "│",
-            f"│ 💊 Medication:  {drug_name}{strength_str}".ljust(57) + "│",
-            f"│ 🕒 Scheduled:   {due_time} (Grace Window: 20 min)".ljust(57) + "│",
-            "│ 📋 Status:      Pending Dose Confirmation              │",
-            "├────────────────────────────────────────────────────────┤",
-            "│ Have you taken this dose?                              │",
-            "│                                                        │",
-            "│   [ 🟢 TAKEN ]       [ 🟡 SKIP ]       [ ⏱️ SNOOZE 15M ] │",
-            "│                                                        │",
-            "│ 👉 Tap a button above or reply 'Taken', 'Skip', 'Later'│",
-            "└────────────────────────────────────────────────────────┘"
+        text = (
+            f"⏰ **Dose Time: {drug_name}{strength_str}**\n\n"
+            f"• **Patient:** {patient_name}\n"
+            f"• **Medication:** {drug_name}{strength_str}\n"
+            f"• **Scheduled:** {due_time} (Grace Window: 20 min)\n"
+            f"• **Status:** Pending dose confirmation\n\n"
+            f"Have you taken this dose?\n"
+            f"👉 Click **Taken**, **Skip**, or **Snooze 15m** below."
+        )
+        buttons = [
+            {"label": "Taken", "action": "dose.taken", "style": "primary"},
+            {"label": "Skip", "action": "dose.skip", "style": "warning"},
+            {"label": "Snooze 15m", "action": "dose.later", "style": "secondary"}
         ]
         card_data = {
             "title": f"Dose Check-in: {drug_name}",
-            "type": "dose_checkin_card",
+            "description": f"Scheduled dose of {drug_name}{strength_str} for {patient_name} at {due_time}.",
             "patient": patient_name,
             "drug": f"{drug_name}{strength_str}",
             "due_time": due_time,
             "status": "pending_confirmation",
+            "buttons": buttons,
             "actions": [
-                {"label": "🟢 Taken", "action_id": "dose.taken", "style": "success"},
-                {"label": "🟡 Skip", "action_id": "dose.skip", "style": "warning"},
-                {"label": "⏱️ Snooze 15m", "action_id": "dose.later", "style": "secondary"}
+                {"label": "Taken", "action_id": "dose.taken", "style": "primary"},
+                {"label": "Skip", "action_id": "dose.skip", "style": "warning"},
+                {"label": "Snooze 15m", "action_id": "dose.later", "style": "secondary"}
             ]
         }
-        return CardPayload("dose_checkin", card_data, "\n".join(lines))
+        return CardPayload("dose_checkin", card_data, text, card_kind="detail")
 
     @staticmethod
     def medication_intake(meds: List[ParsedMedSchedule]) -> CardPayload:
         lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            "│ 📋 CONFIRM MEDICATION SCHEDULE                         │",
-            "├────────────────────────────────────────────────────────┤",
-            "│ Please review the parsed regimen below:                │",
-            "│                                                        │"
+            "📋 **Medication Schedule Review**\n",
+            "Please confirm your parsed prescription schedule:\n"
         ]
         med_items = []
         for i, m in enumerate(meds, 1):
             times_str = ", ".join(m.times) if m.times else "Daily"
             instr = f" ({m.instructions})" if m.instructions else ""
-            lines.append(f"│ {i}. 💊 {m.drug_name} {m.strength}".ljust(57) + "│")
-            lines.append(f"│    ⏱️ {m.frequency} at {times_str}{instr}".ljust(57) + "│")
-            lines.append(f"│    📦 Supply: {m.qty_on_hand} pills remaining".ljust(57) + "│")
-            lines.append("│                                                        │")
+            lines.append(f"**{i}. {m.drug_name}** `{m.strength}`")
+            lines.append(f"   • Frequency: {m.frequency} at {times_str}{instr}")
+            lines.append(f"   • Supply runway: {m.qty_on_hand} pills remaining")
+            lines.append("")
             med_items.append({
                 "name": m.drug_name,
                 "strength": m.strength,
@@ -76,53 +74,52 @@ class CardBuilder:
                 "instructions": m.instructions
             })
 
-        lines.extend([
-            "├────────────────────────────────────────────────────────┤",
-            "│   [ ✅ CONFIRM SCHEDULE ]         [ ❌ CANCEL ]         │",
-            "│                                                        │",
-            "│ 👉 Tap a button above or reply 'Confirm' / 'Cancel'    │",
-            "└────────────────────────────────────────────────────────┘"
-        ])
+        lines.append("👉 Click **Confirm Schedule** to save and activate automated reminders, or **Cancel** to abort.")
         
+        buttons = [
+            {"label": "Confirm Schedule", "action": "med.confirm", "style": "primary"},
+            {"label": "Cancel", "action": "med.cancel", "style": "danger"}
+        ]
         card_data = {
             "title": "Confirm Medication Schedule",
-            "type": "medication_intake_card",
+            "description": f"Review and activate schedule for {len(meds)} medications.",
             "medications": med_items,
+            "buttons": buttons,
             "actions": [
-                {"label": "✅ Confirm Schedule", "action_id": "med.confirm", "style": "primary"},
-                {"label": "❌ Cancel", "action_id": "med.cancel", "style": "danger"}
+                {"label": "Confirm Schedule", "action_id": "med.confirm", "style": "primary"},
+                {"label": "Cancel", "action_id": "med.cancel", "style": "danger"}
             ]
         }
-        return CardPayload("medication_intake", card_data, "\n".join(lines))
+        return CardPayload("medication_intake", card_data, "\n".join(lines), card_kind="detail")
 
     @staticmethod
     def interaction_review(findings: List[InteractionFinding], source_status: str = "ok") -> CardPayload:
         if not findings:
-            note = "⚠️ (FDA real-time label momentarily degraded)" if source_status == "degraded" else "✅ No FDA label interaction flags found"
-            lines = [
-                "┌────────────────────────────────────────────────────────┐",
-                "│ 🛡️ FDA SAFETY SCREENING: CLEAN                         │",
-                "├────────────────────────────────────────────────────────┤",
-                f"│ {note}".ljust(57) + "│",
-                "│ Verified against official openFDA label database.      │",
-                "└────────────────────────────────────────────────────────┘"
-            ]
-            card_data = {"status": "clean", "findings": []}
-            return CardPayload("interaction_review", card_data, "\n".join(lines))
+            text = (
+                "🛡️ **FDA Safety Screening: Clean**\n\n"
+                "✅ No interaction warnings flagged in the official FDA label database for these medications.\n"
+                "Always verify with your doctor or pharmacist when starting any new drug."
+            )
+            card_data = {
+                "title": "Safety Screening Clean",
+                "description": "No FDA drug-drug interaction warnings found.",
+                "status": "clean",
+                "findings": []
+            }
+            return CardPayload("interaction_review", card_data, text, card_kind="detail")
 
         lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            "│ 🛡️ FDA MEDICATION INTERACTION ADVISORY                 │",
-            "├────────────────────────────────────────────────────────┤",
-            "│ Source: Official openFDA Drug Label Interactions       │",
-            "├────────────────────────────────────────────────────────┤"
+            "🛡️ **FDA Medication Interaction Advisory**\n",
+            "Source: Official openFDA Drug Label Interactions\n"
         ]
         card_findings = []
         for f in findings:
-            lines.append(f"│ ⚠️ WARNING: {f.drug_a} + {f.drug_b}".ljust(57) + "│")
-            lines.append(f"│ • Excerpt: \"{f.quote[:42]}...\"".ljust(57) + "│")
-            lines.append(f"│ • Ask Pharmacist: \"{f.pharmacist_question[:36]}...\"".ljust(57) + "│")
-            lines.append("│                                                        │")
+            lines.append(f"⚠️ **{f.drug_a} + {f.drug_b}**")
+            lines.append(f"• **Label Excerpt:** \"{f.quote}\"")
+            lines.append(f"• **Pharmacist Question to Ask:** *\"{f.pharmacist_question}\"*")
+            if f.source_url:
+                lines.append(f"• **Source:** [FDA Drug Label]({f.source_url})")
+            lines.append("")
             card_findings.append({
                 "drug_a": f.drug_a,
                 "drug_b": f.drug_b,
@@ -131,136 +128,131 @@ class CardBuilder:
                 "source_url": f.source_url
             })
 
-        lines.extend([
-            "├────────────────────────────────────────────────────────┤",
-            "│   [ 🛡️ I ACKNOWLEDGE ]       [ 📋 COPY PHARMACIST Q ]  │",
-            "│                                                        │",
-            "│ 👉 Tap 'Acknowledge' to proceed with scheduling        │",
-            "└────────────────────────────────────────────────────────┘"
-        ])
-
+        lines.append("👉 Click **I Acknowledge** to proceed with scheduling.")
+        buttons = [
+            {"label": "I Acknowledge", "action": "interaction.acknowledge", "style": "primary"},
+            {"label": "Copy Pharmacist Question", "action": "interaction.copy_question", "style": "secondary"}
+        ]
         card_data = {
             "title": "Medication Interaction Advisory",
-            "type": "interaction_review_card",
+            "description": f"Found {len(findings)} potential interaction warnings in FDA drug labels.",
             "findings": card_findings,
+            "buttons": buttons,
             "actions": [
-                {"label": "🛡️ I Acknowledge", "action_id": "interaction.acknowledge", "style": "primary"},
-                {"label": "📋 Copy Pharmacist Question", "action_id": "interaction.copy_question", "style": "secondary"}
+                {"label": "I Acknowledge", "action_id": "interaction.acknowledge", "style": "primary"},
+                {"label": "Copy Pharmacist Question", "action_id": "interaction.copy_question", "style": "secondary"}
             ]
         }
-        return CardPayload("interaction_review", card_data, "\n".join(lines))
+        return CardPayload("interaction_review", card_data, "\n".join(lines), card_kind="detail")
 
     @staticmethod
     def price_carousel(drug_name: str, strength: str, qty: int, quotes: List[Quote], is_estimate: bool = True) -> CardPayload:
         lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            f"│ 💊 PHARMACY REFILL PRICE COMPARISON                    │",
-            "├────────────────────────────────────────────────────────┤",
-            f"│ Drug: {drug_name} {strength} • {qty} count supply".ljust(57) + "│",
-            "│ Partner verified & CMS NADAC reference pricing         │",
-            "├────────────────────────────────────────────────────────┤"
+            f"💊 **Pharmacy Refill Comparison: {drug_name} {strength}**\n",
+            f"Quantity: {qty} count supply • Partner verified & CMS NADAC reference pricing\n"
         ]
-        card_quotes = []
+        items = []
+        buttons = []
         actions = []
 
-        medals = ["🥇", "🥈", "🥉"]
         for i, q in enumerate(quotes, 1):
-            medal = medals[i - 1] if i <= len(medals) else f"#{i}"
-            delivery = f"🚚 {q.delivery_days}-day mail" if q.delivery_days > 0 else "🏬 Same-day pickup"
-            lines.append(f"│ {medal} Option {i}: {q.pharmacy_name}".ljust(57) + "│")
-            lines.append(f"│    💰 ${q.price_dollars:.2f} USD [{delivery}]".ljust(57) + "│")
+            delivery = f"Delivered in {q.delivery_days} days" if q.delivery_days > 0 else "Same-day pickup"
+            lines.append(f"**Option {i}: {q.pharmacy_name}**")
+            lines.append(f"• Price: **${q.price_dollars:.2f} USD** ({delivery})")
             if q.details:
-                lines.append(f"│    ℹ️ {q.details[:48]}".ljust(57) + "│")
-            lines.append(f"│    👉 [ 🛒 SELECT OPTION {i} (${q.price_dollars:.2f}) ]".ljust(57) + "│")
-            lines.append("│                                                        │")
-            card_quotes.append({
-                "option_number": i,
-                "pharmacy": q.pharmacy_name,
-                "price_dollars": q.price_dollars,
-                "delivery": delivery,
-                "details": q.details
-            })
+                lines.append(f"• Details: {q.details}")
+            lines.append("")
+
+            btn = {
+                "label": f"Select {q.pharmacy_name} (${q.price_dollars:.2f})",
+                "action": f"refill.select:{i}",
+                "style": "primary"
+            }
+            buttons.append(btn)
             actions.append({
-                "label": f"🛒 Option {i}: {q.pharmacy_name} (${q.price_dollars:.2f})",
+                "label": f"Select {q.pharmacy_name} (${q.price_dollars:.2f})",
                 "action_id": f"refill.select:{i}",
                 "style": "primary"
             })
+            items.append({
+                "id": f"option_{i}",
+                "title": q.pharmacy_name,
+                "price": f"${q.price_dollars:.2f}",
+                "delivery": delivery,
+                "details": q.details or "",
+                "buttons": [btn]
+            })
 
-        lines.extend([
-            "├────────────────────────────────────────────────────────┤",
-            "│ 👉 Tap a button above or reply 'Select Option 1'       │",
-            "└────────────────────────────────────────────────────────┘"
-        ])
+        lines.append("👉 Tap a pharmacy button below to proceed to checkout.")
 
         card_data = {
             "title": f"Price Comparison: {drug_name}",
-            "type": "price_carousel_card",
-            "quotes": card_quotes,
+            "description": f"Refill quotes for {drug_name} {strength} ({qty} pills)",
+            "items": items,
+            "buttons": buttons,
             "actions": actions
         }
-        return CardPayload("price_carousel", card_data, "\n".join(lines))
+        return CardPayload("price_carousel", card_data, "\n".join(lines), card_kind="carousel")
 
     @staticmethod
     def refill_approval(drug_name: str, pharmacy_name: str, price_cents: int, payment_id: str) -> CardPayload:
         price_str = f"${price_cents / 100:.2f}"
         lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            "│ 🛒 AUTHORIZE REFILL & PAYMENT                          │",
-            "├────────────────────────────────────────────────────────┤",
-            f"│ 💊 Medication:  {drug_name} (30-day supply)".ljust(57) + "│",
-            f"│ 🏬 Pharmacy:    {pharmacy_name}".ljust(57) + "│",
-            f"│ 💵 Total Due:   {price_str} USD".ljust(57) + "│",
-            f"│ 🔐 Payment Ref: {payment_id}".ljust(57) + "│",
-            "├────────────────────────────────────────────────────────┤",
-            "│ This order will be dispatched to the pharmacy partner. │",
-            "│                                                        │",
-            f"│   [ 💳 APPROVE & PAY {price_str} ]       [ ❌ CANCEL ]   │",
-            "│                                                        │",
-            "│ 👉 Tap a button above or reply 'Approve & Pay'         │",
-            "└────────────────────────────────────────────────────────┘"
+            "🛒 **Authorize Refill & Payment**\n",
+            f"• **Medication:** {drug_name} (30-day supply)",
+            f"• **Pharmacy Partner:** {pharmacy_name}",
+            f"• **Total Authorized:** **{price_str} USD**",
+            f"• **Payment Protocol Request:** `{payment_id}`\n",
+            "This order will be submitted directly to the pharmacy partner.",
+            f"\n👉 Click **Approve & Pay {price_str}** below to authorize:"
+        ]
+        buttons = [
+            {"label": f"Approve & Pay {price_str}", "action": f"refill.approve:{payment_id}", "style": "success"},
+            {"label": "Cancel Order", "action": "refill.cancel", "style": "danger"}
         ]
         card_data = {
             "title": "Authorize Refill Order",
-            "type": "refill_approval_card",
+            "description": f"Payment authorization of {price_str} for {drug_name} via {pharmacy_name}.",
             "drug": drug_name,
             "pharmacy": pharmacy_name,
             "total": price_str,
             "payment_id": payment_id,
+            "buttons": buttons,
             "actions": [
-                {"label": f"💳 Approve & Pay {price_str}", "action_id": f"refill.approve:{payment_id}", "style": "success"},
-                {"label": "❌ Cancel Order", "action_id": "refill.cancel", "style": "danger"}
+                {"label": f"Approve & Pay {price_str}", "action_id": f"refill.approve:{payment_id}", "style": "success"},
+                {"label": "Cancel Order", "action_id": "refill.cancel", "style": "danger"}
             ]
         }
-        return CardPayload("refill_approval", card_data, "\n".join(lines))
+        return CardPayload("refill_approval", card_data, "\n".join(lines), card_kind="detail")
 
     @staticmethod
     def caregiver_alert(caregiver_name: str, patient_name: str, drug_name: str, due_time: str) -> CardPayload:
-        lines = [
-            "┌────────────────────────────────────────────────────────┐",
-            "│ 🚨 CAREGIVER ESCALATION ALERT                          │",
-            "├────────────────────────────────────────────────────────┤",
-            f"│ 👤 Patient:     {patient_name}".ljust(57) + "│",
-            f"│ 💊 Missed Dose: {drug_name}".ljust(57) + "│",
-            f"│ 🕒 Scheduled:   {due_time}".ljust(57) + "│",
-            "│ ⚠️ 20-min grace period expired without confirmation.   │",
-            "├────────────────────────────────────────────────────────┤",
-            "│   [ 📞 CALL PATIENT ]   [ ⏱️ SNOOZE 30M ]   [ 🟢 MARK TAKEN ] │",
-            "│                                                        │",
-            "│ 👉 Tap an action or reply 'Call', 'Snooze', 'Taken'   │",
-            "└────────────────────────────────────────────────────────┘"
+        text = (
+            f"🚨 **Caregiver Escalation Alert: Missed Dose for {patient_name}**\n\n"
+            f"• **Patient:** {patient_name}\n"
+            f"• **Missed Dose:** {drug_name}\n"
+            f"• **Scheduled:** {due_time}\n"
+            f"• **Status:** Grace period expired without dose confirmation.\n\n"
+            f"👉 Choose an escalation action below:"
+        )
+        buttons = [
+            {"label": "Call Patient", "action": "caregiver.call", "style": "primary"},
+            {"label": "Snooze 30m", "action": "caregiver.snooze", "style": "secondary"},
+            {"label": "Mark as Taken", "action": "caregiver.mark_taken", "style": "success"}
         ]
         card_data = {
             "title": f"Caregiver Alert: {patient_name}",
-            "type": "caregiver_alert_card",
+            "description": f"Missed dose of {drug_name} due at {due_time}.",
             "patient": patient_name,
             "drug": drug_name,
             "due_time": due_time,
+            "buttons": buttons,
             "actions": [
-                {"label": "📞 Call Patient", "action_id": "caregiver.call", "style": "primary"},
-                {"label": "⏱️ Snooze 30m", "action_id": "caregiver.snooze", "style": "secondary"},
-                {"label": "🟢 Mark as Taken", "action_id": "caregiver.mark_taken", "style": "success"}
+                {"label": "Call Patient", "action_id": "caregiver.call", "style": "primary"},
+                {"label": "Snooze 30m", "action_id": "caregiver.snooze", "style": "secondary"},
+                {"label": "Mark as Taken", "action_id": "caregiver.mark_taken", "style": "success"}
             ]
         }
-        return CardPayload("caregiver_alert", card_data, "\n".join(lines))
+        return CardPayload("caregiver_alert", card_data, text, card_kind="detail")
 
 cards = CardBuilder()

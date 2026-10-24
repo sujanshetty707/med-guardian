@@ -22,11 +22,21 @@ def create_text_chat_message(text: str, card_data: Optional[Dict[str, Any]] = No
     contents = [TextContent(type="text", text=text)]
     if card_data:
         try:
-            # MetadataContent in uagents_core expects Mapping[str, str]
+            card_kind = card_data.get("card_kind") or card_data.get("card_type") or "detail"
+            payload = card_data.get("data") if "data" in card_data else card_data
+
+            # Official ASI:One / Agentverse Interactive Cards Protocol v1
             string_metadata = {
-                str(k): (v if isinstance(v, str) else json.dumps(v))
-                for k, v in card_data.items()
+                "card_protocol_version": "1",
+                "requires_card_interaction": "true",
+                "card_kind": str(card_kind),
+                "card_payload": json.dumps(payload) if not isinstance(payload, str) else payload,
             }
+            # Also preserve top-level keys for any client compatibility
+            for k, v in card_data.items():
+                if k not in string_metadata:
+                    string_metadata[str(k)] = v if isinstance(v, str) else json.dumps(v)
+
             contents.append(MetadataContent(type="metadata", metadata=string_metadata))
         except Exception as e:
             logger.warning(f"Could not attach card metadata to message: {e}")

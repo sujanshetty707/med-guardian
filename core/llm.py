@@ -90,6 +90,9 @@ class LLMParser:
         if "link caregiver" in normalized or "add caregiver" in normalized:
             return IntentClassification("LINK_CAREGIVER", {"raw": text}, raw_text=text)
 
+        if "interaction.acknowledge" in normalized or normalized in ["acknowledge", "i acknowledge", "acknowledged", "copy pharmacist question"]:
+            return IntentClassification("ACKNOWLEDGE_SAFETY", {}, is_confirmation=True, raw_text=text)
+
         if any(k in normalized for k in ["interact", "interaction", "safe together", "take with", "can i take"]):
             return IntentClassification("CHECK_INTERACTION", {"raw": text}, raw_text=text)
 

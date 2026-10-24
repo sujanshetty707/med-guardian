@@ -290,6 +290,13 @@ async def process_orchestrator_turn(sender_addr: str, text: str) -> CardPayload:
         card = cards.interaction_review(findings, source_status)
         return CardPayload(card.card_type, card.card_data, guardrails.post_format(card.text_fallback))
 
+    elif intent.name == "ACKNOWLEDGE_SAFETY":
+        reply = (
+            "🛡️ **Safety Advisory Acknowledged**\n\n"
+            "Thank you for confirming. Always be sure to check with your prescribing physician or licensed pharmacist regarding medication combinations with warnings."
+        )
+        return CardPayload("text_reply", {}, guardrails.post_format(reply))
+
     elif intent.name == "REFILL":
         drug_name = intent.entities.get("drug_name", "Metformin").capitalize()
         # Fetch prices for drug
