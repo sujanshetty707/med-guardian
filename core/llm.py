@@ -84,6 +84,18 @@ class LLMParser:
         if meds:
             return IntentClassification("ADD_MEDICATIONS", {"medications": meds}, raw_text=text)
 
+        # ── FAST PATH: clearly conversational messages → GENERAL intent ────────
+        # Route these directly to the conversational response handler
+        general_patterns = [
+            "hello", "hi ", "hey", "good morning", "good afternoon", "good evening",
+            "howdy", "thank", "thanks", "bye", "goodbye", "see you",
+            "how are you", "what's up", "who are you", "what are you",
+            "what can you do", "help me", "what do you do",
+            "your name", "tell me about yourself",
+        ]
+        if any(p in normalized for p in general_patterns) or normalized in ["hi", "hey", "yo", "sup"]:
+            return IntentClassification("GENERAL", {"text": text}, raw_text=text)
+
         # ── SLOW PATH: LLM only for genuinely ambiguous free-form text ─────────
         # Only used if ASI1_API_KEY is set AND the message wasn't handled above
         if self.client:
@@ -105,7 +117,7 @@ class LLMParser:
                 )
                 response = await asyncio.wait_for(llm_coro, timeout=LLM_TIMEOUT_SECONDS)
                 parsed = json.loads(response.choices[0].message.content)
-                intent_name = parsed.get("intent", "ADD_MEDICATIONS")
+                intent_name = parsed.get("intent", "GENERAL")
                 return IntentClassification(intent_name, parsed, raw_text=text)
             except asyncio.TimeoutError:
                 logger.warning("ASI1 LLM timed out after 5s — using GENERAL fallback.")
@@ -190,5 +202,183 @@ class LLMParser:
                 ))
 
         return results
+
+    async def generate_response(self, text: str, context: str = "", patient_meds: list = None) -> str:
+        """
+        Generate a conversational response for general/unrecognized messages.
+        Uses the LLM when available, falls back to smart rule-based responses.
+        """
+        if self.client:
+            try:
+                system_prompt = (
+                    "You are Med-Guardian, a friendly and knowledgeable medication adherence assistant. "
+                    "You help patients and caregivers manage medication schedules, track doses, check interactions, "
+                    "compare pharmacy prices, and monitor adherence.\n\n"
+                    "IMPORTANT RULES:\n"
+                    "- You are NOT a doctor. Never diagnose, prescribe, or recommend dosage changes.\n"
+                    "- For medical emergencies, always tell the user to call 911.\n"
+                    "- You CAN answer general health/wellness questions with standard public knowledge.\n"
+                    "- You CAN explain what medications are commonly used for (public info).\n"
+                    "- You CAN help with scheduling, reminders, adherence tips, and pharmacy logistics.\n"
+                    "- Be warm, supportive, and concise.\n"
+                    "- Use emoji sparingly to keep responses friendly.\n"
+                    "- Always add a gentle reminder to consult their doctor for medical decisions.\n\n"
+                )
+                if patient_meds:
+                    med_list = ", ".join(patient_meds)
+                    system_prompt += f"The patient currently takes: {med_list}.\n"
+                if context:
+                    system_prompt += f"Additional context: {context}\n"
+
+                llm_coro = self.client.chat.completions.create(
+                    model="asi1-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text}
+                    ],
+                    max_tokens=512,
+                )
+                response = await asyncio.wait_for(llm_coro, timeout=LLM_TIMEOUT_SECONDS)
+                reply = response.choices[0].message.content.strip()
+                if reply:
+                    return reply
+            except asyncio.TimeoutError:
+                logger.warning("ASI1 LLM timed out generating response — using fallback.")
+            except Exception as e:
+                logger.warning(f"ASI1 LLM response generation failed: {e} — using fallback.")
+
+        # Smart rule-based fallback when no LLM is available
+        return self._smart_fallback(text)
+
+    def _smart_fallback(self, text: str) -> str:
+        """
+        Intelligent keyword-based fallback responses for when no LLM API key is configured.
+        Actually responds to what the user asked instead of showing the generic welcome.
+        """
+        normalized = text.strip().lower()
+
+        # Greetings
+        if any(g in normalized for g in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "sup"]):
+            return (
+                "👋 **Hello!** Welcome to Med-Guardian — your medication adherence and caregiver safety assistant.\n\n"
+                "Here's what I can help you with:\n"
+                "• **Add medications** — Tell me what medicines you're managing\n"
+                "• **Check interactions** — Ask about drug combinations\n"
+                "• **Log doses** — Say \"Taken\" or \"Skip\"\n"
+                "• **Refill medications** — Compare pharmacy prices\n"
+                "• **Weekly adherence report** — See how you're doing\n\n"
+                "Just type naturally and I'll do my best to help! 😊"
+            )
+
+        # Thanks / gratitude
+        if any(w in normalized for w in ["thank", "thanks", "thx", "appreciate"]):
+            return "😊 You're welcome! I'm here whenever you need help with your medications. Don't hesitate to ask!"
+
+        # How are you / status
+        if any(p in normalized for p in ["how are you", "how do you do", "what's up", "how's it going"]):
+            return (
+                "I'm doing great, thank you for asking! 😊\n\n"
+                "I'm here and ready to help you manage medications, track doses, "
+                "check for drug interactions, or compare pharmacy prices. What can I do for you today?"
+            )
+
+        # What can you do / help
+        if any(p in normalized for p in ["what can you do", "help me", "what do you do", "features", "capabilities", "how do you work", "how does this work"]):
+            return (
+                "🏥 **Here's everything I can help with:**\n\n"
+                "📋 **Medication Management**\n"
+                "• Add and track medications with schedules\n"
+                "• Parse natural language like: *\"Metformin 500mg twice daily\"*\n\n"
+                "🛡️ **Safety Checks**\n"
+                "• Screen for drug-drug interactions using FDA data\n"
+                "• Flag potential concerns for pharmacist discussion\n\n"
+                "⏰ **Dose Tracking**\n"
+                "• Log doses as taken, skipped, or snoozed\n"
+                "• Track adherence over time\n\n"
+                "💊 **Pharmacy & Refills**\n"
+                "• Compare prices across pharmacies\n"
+                "• Place refill orders with price estimates\n\n"
+                "👨‍👩‍👦 **Caregiver Support**\n"
+                "• Link caregivers for missed-dose alerts\n"
+                "• Weekly adherence reports\n\n"
+                "Just ask me anything — I understand natural language!"
+            )
+
+        # Who are you / about
+        if any(p in normalized for p in ["who are you", "what are you", "about you", "your name", "introduce yourself"]):
+            return (
+                "🤖 I'm **Med-Guardian**, your ASI:One-powered medication adherence assistant!\n\n"
+                "I help patients and caregivers:\n"
+                "• Organize medication schedules\n"
+                "• Track dose adherence\n"
+                "• Screen for drug interactions (using real FDA data)\n"
+                "• Compare pharmacy prices for refills\n"
+                "• Alert caregivers about missed doses\n\n"
+                "I'm built on the Fetch.ai agent network and I'm here to make medication management easier and safer."
+            )
+
+        # Questions about specific medication info (general knowledge)
+        if any(p in normalized for p in ["what is", "what's", "tell me about", "explain", "information about", "info on", "describe"]):
+            return (
+                f"That's a great question! While I can help with medication scheduling, "
+                f"interactions, and adherence tracking, for detailed medical information "
+                f"I'd recommend checking with your pharmacist or a trusted source like "
+                f"**MedlinePlus** (medlineplus.gov) or **WebMD**.\n\n"
+                f"Meanwhile, I can help if you want to:\n"
+                f"• **Add this medication** to your schedule\n"
+                f"• **Check interactions** with your current meds\n"
+                f"• **Look up refill prices** at nearby pharmacies\n\n"
+                f"Just let me know! 💊"
+            )
+
+        # Questions about side effects
+        if any(p in normalized for p in ["side effect", "adverse", "reaction", "allergy", "allergic"]):
+            return (
+                "⚕️ Side effects and allergic reactions are important to discuss with your doctor or pharmacist.\n\n"
+                "I can help you:\n"
+                "• **Check drug interactions** between your medications\n"
+                "• **Log if you skip a dose** due to side effects\n"
+                "• **Connect with your caregiver** if you're feeling unwell\n\n"
+                "If you're experiencing a severe reaction, please **call 911** or go to the nearest ER immediately."
+            )
+
+        # Timing questions
+        if any(p in normalized for p in ["when should i", "best time to take", "morning or night", "before or after", "with food", "empty stomach"]):
+            return (
+                "⏰ Great question about medication timing!\n\n"
+                "General tips:\n"
+                "• **With food**: Many medications (like Metformin) are better absorbed with meals\n"
+                "• **Morning meds**: Blood pressure and thyroid meds often work best in the morning\n"
+                "• **Night meds**: Statins (like Atorvastatin) are often taken at bedtime\n"
+                "• **Consistency**: Taking meds at the same time daily improves effectiveness\n\n"
+                "For specific timing, always follow your doctor's instructions. "
+                "Want me to help set up a schedule? Just tell me your medications!"
+            )
+
+        # Goodbye
+        if any(w in normalized for w in ["bye", "goodbye", "see you", "later", "gotta go", "good night"]):
+            return "👋 Take care! Remember to take your medications on time. I'm here whenever you need me!"
+
+        # Yes/no without context
+        if normalized in ["yes", "no", "ok", "okay", "sure", "alright", "yep", "nope"]:
+            return (
+                "Got it! Is there anything specific I can help you with? You can:\n"
+                "• Tell me about your medications to set up a schedule\n"
+                "• Ask about drug interactions\n"
+                "• Check refill prices\n"
+                "• View your adherence report"
+            )
+
+        # Catch-all: actually acknowledge what they said
+        return (
+            f"I appreciate your message! I'm Med-Guardian, focused on medication management.\n\n"
+            f"I may not fully understand that request, but here's how I can help:\n"
+            f"• **Add medications**: *\"I take Metformin 500mg twice daily\"*\n"
+            f"• **Check interactions**: *\"Can I take Ibuprofen with Metformin?\"*\n"
+            f"• **Log a dose**: Say *\"Taken\"* or *\"Skip\"*\n"
+            f"• **Refill**: *\"Refill Metformin\"*\n"
+            f"• **Adherence report**: *\"How did Dad do this week?\"*\n\n"
+            f"Try rephrasing or ask me one of the above! 😊"
+        )
 
 llm_parser = LLMParser()

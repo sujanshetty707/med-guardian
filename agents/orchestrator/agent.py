@@ -404,17 +404,25 @@ async def process_orchestrator_turn(sender_addr: str, text: str) -> CardPayload:
         return CardPayload("text_reply", {}, guardrails.post_format(reply))
 
     else:
-        # General assistance
-        reply = (
-            "👋 **Welcome to Med-Guardian** — your ASI:One adherence, refill, and caregiver safety assistant.\n\n"
-            "Here is what you can say:\n"
-            "• **Add meds:** *\"I'm managing my dad's medicines: Metformin 500mg twice daily, Amlodipine 5mg morning, Atorvastatin 20mg night. He has 10 days left of Metformin.\"*\n"
-            "• **Check interactions:** *\"Can I take Ibuprofen with Metformin?\"*\n"
-            "• **Log dose:** *\"Taken\"* or *\"Skip\"*\n"
-            "• **Compare prices & refill:** *\"Refill Metformin\"*\n"
-            "• **Adherence check:** *\"How did Dad do this week?\"*"
+        # General / conversational — use LLM for dynamic response
+        # Gather patient's current medications for context
+        patient_med_names = []
+        try:
+            with SessionLocal() as db:
+                active_meds = db.query(Medication).filter(
+                    Medication.patient_id == patient_id,
+                    Medication.active == True
+                ).all()
+                patient_med_names = [m.display_name for m in active_meds]
+        except Exception:
+            pass
+
+        reply = await llm_parser.generate_response(
+            text=text,
+            context=f"Patient ID: {patient_id}",
+            patient_meds=patient_med_names if patient_med_names else None,
         )
-        return CardPayload("welcome", {}, guardrails.post_format(reply))
+        return CardPayload("general_response", {}, guardrails.post_format(reply))
 
 # --- ACP Chat Handlers ---
 @chat_proto.on_message(ChatMessage)
